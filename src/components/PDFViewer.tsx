@@ -167,8 +167,10 @@ const PDFViewer = () => {
                 <Progress value={progress} className="w-full" />
                 <p className="text-sm text-muted-foreground">
                   {progress < 10 && "Loading document..."}
-                  {progress >= 10 && progress < 90 && "Processing pages..."}
-                  {progress >= 90 && "Finalizing..."}
+                  {progress >= 10 && progress < 30 && "Processing pages..."}
+                  {progress >= 30 && progress < 70 && "Extracting text content..."}
+                  {progress >= 70 && progress < 90 && "Applying OCR for better accuracy..."}
+                  {progress >= 90 && "Finalizing text regions..."}
                 </p>
               </div>
             </div>
@@ -197,6 +199,12 @@ const PDFViewer = () => {
                   <p className="text-sm text-muted-foreground">
                     Successfully processed {pages.length} page{pages.length !== 1 ? 's' : ''} with{' '}
                     {pages.reduce((sum, page) => sum + page.textChunks.length, 0)} text regions
+                    {pages.some(page => page.textChunks.some(chunk => chunk.id.includes('ocr'))) && (
+                      <span className="inline-flex items-center gap-1 ml-2 text-pdf-primary">
+                        <span>•</span>
+                        <span className="font-medium">OCR Enhanced</span>
+                      </span>
+                    )}
                   </p>
                 </div>
                 <Button
