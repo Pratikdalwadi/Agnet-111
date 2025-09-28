@@ -1,14 +1,12 @@
-modules = ["nodejs-20", "web", "python-3.11"]
-[agent]
-expertMode = true
+modules = ["web", "nodejs-20", "python-3.11"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["mesa", "libuuid"]
 
-[deployment]
-deploymentTarget = "autoscale"
-run = ["npm", "start"]
-build = ["npm", "run", "build"]
+[agent]
+expertMode = true
+integrations = ["javascript_openai:1.0.0"]
 
 [workflows]
 runButton = "Project"
@@ -26,18 +24,23 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [[ports]]
 localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 33005
+localPort = 42577
 externalPort = 3000
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["npm", "run", "start"]
+build = ["npm", "run", "build"]

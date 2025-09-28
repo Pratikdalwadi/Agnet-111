@@ -3,11 +3,18 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Upload, FileText, AlertCircle, CheckCircle } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, FileText, AlertCircle, CheckCircle, Sparkles, Target, Brain, Eye } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import PDFProcessor, { PageData } from './PDFProcessor';
+import EnhancedPDFProcessor from './EnhancedPDFProcessor';
 import DocumentViewer from './DocumentViewer';
 import TextSearch from './TextSearch';
+import TextChunkHighlighter from './TextChunkHighlighter';
+import PerfectExtractionDashboard from './PerfectExtractionDashboard';
+import { ExtractionResult, TextChunk, Grounding, transformLegacyToGrounding, LegacyPageData } from '@/types';
 
 const PDFViewer = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -17,6 +24,12 @@ const PDFViewer = () => {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string>('');
   const [selectedChunk, setSelectedChunk] = useState<string>('');
+  const [advancedMode, setAdvancedMode] = useState(false);
+  const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
+  const [textChunks, setTextChunks] = useState<TextChunk[]>([]);
+  const [highlightedGrounding, setHighlightedGrounding] = useState<Grounding | null>(null);
+  const [activeView, setActiveView] = useState<'document' | 'analytics' | 'chunks'>('document');
+  const [documentDimensions, setDocumentDimensions] = useState({ width: 0, height: 0 });
   const { toast } = useToast();
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -29,10 +42,13 @@ const PDFViewer = () => {
       setError('');
       setIsProcessing(true);
       setProgress(0);
+      setExtractionResult(null);
+      setTextChunks([]);
+      setHighlightedGrounding(null);
       
       toast({
         title: "Processing PDF",
-        description: "Extracting text and generating images...",
+        description: advancedMode ? "Performing advanced AI extraction..." : "Extracting text and generating images...",
       });
     } else {
       setError('Please select a valid PDF file.');
@@ -42,7 +58,7 @@ const PDFViewer = () => {
         variant: "destructive",
       });
     }
-  }, [toast]);
+  }, [toast, advancedMode]);
 
   const handleProcessingComplete = useCallback((processedPages: PageData[]) => {
     setPages(processedPages);
@@ -51,9 +67,52 @@ const PDFViewer = () => {
     
     const totalChunks = processedPages.reduce((sum, page) => sum + page.textChunks.length, 0);
     
+    // Set document dimensions from first page
+    if (processedPages.length > 0) {
+      const firstPage = processedPages[0];
+      if (firstPage.imageUrl) {
+        const img = new Image();
+        img.onload = () => {
+          setDocumentDimensions({ width: img.width, height: img.height });
+        };
+        img.src = firstPage.imageUrl;
+      }
+    }
+    
     toast({
       title: "Processing Complete",
       description: `Successfully processed ${processedPages.length} pages with ${totalChunks} text regions.`,
+    });
+  }, [toast]);
+
+  const handleEnhancedProcessingComplete = useCallback((processedPages: LegacyPageData[], result: ExtractionResult) => {
+    setPages(processedPages);
+    setExtractionResult(result);
+    setTextChunks(result.chunks || []);
+    setIsProcessing(false);
+    setCurrentPage(1);
+    
+    // Set document dimensions from intermediate representation or first page
+    if (result.intermediate_representation?.pages?.[0]) {
+      const firstIRPage = result.intermediate_representation.pages[0];
+      setDocumentDimensions({ width: firstIRPage.width, height: firstIRPage.height });
+    } else if (processedPages.length > 0) {
+      const firstPage = processedPages[0];
+      if (firstPage.imageUrl) {
+        const img = new Image();
+        img.onload = () => {
+          setDocumentDimensions({ width: img.width, height: img.height });
+        };
+        img.src = firstPage.imageUrl;
+      }
+    }
+    
+    const totalElements = (result.chunks?.length || 0) + 
+                         (result.intermediate_representation?.pages?.[0]?.blocks?.length || 0);
+    
+    toast({
+      title: "Advanced Processing Complete",
+      description: `Successfully extracted ${totalElements} elements with AI-powered analysis.`,
     });
   }, [toast]);
 
@@ -92,6 +151,22 @@ const PDFViewer = () => {
     setSelectedChunk(chunkId);
   }, [pages, currentPage]);
 
+  // Advanced feature handlers
+  const handleTextChunkHighlight = useCallback((chunkId: string | null, grounding?: Grounding) => {
+    setSelectedChunk(chunkId || '');
+    setHighlightedGrounding(grounding || null);
+  }, []);
+
+  const handleTextChunkClick = useCallback((chunk: TextChunk) => {
+    setSelectedChunk(chunk.chunk_id);
+    if (chunk.grounding && chunk.grounding.length > 0) {
+      const targetPage = chunk.grounding[0].page + 1; // Convert to 1-based
+      if (targetPage !== currentPage) {
+        setCurrentPage(targetPage);
+      }
+    }
+  }, [currentPage]);
+
   const resetViewer = () => {
     setFile(null);
     setPages([]);
@@ -100,6 +175,10 @@ const PDFViewer = () => {
     setError('');
     setIsProcessing(false);
     setProgress(0);
+    setExtractionResult(null);
+    setTextChunks([]);
+    setHighlightedGrounding(null);
+    setActiveView('document');
   };
 
   return (
@@ -110,10 +189,43 @@ const PDFViewer = () => {
           <div className="flex items-center justify-center gap-3 mb-4">
             <FileText className="w-8 h-8 text-pdf-primary" />
             <h1 className="text-3xl font-bold text-foreground">PDF Text Extractor</h1>
+            {advancedMode && <Sparkles className="w-6 h-6 text-pdf-accent" />}
           </div>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Upload a PDF document to extract and search through all text content with interactive highlighting
+            {advancedMode 
+              ? "AI-powered document analysis with text chunk grounding and semantic understanding"
+              : "Upload a PDF document to extract and search through all text content with interactive highlighting"
+            }
           </p>
+          
+          {/* Advanced Mode Toggle */}
+          <div className="flex items-center justify-center gap-3 mt-6">
+            <Label htmlFor="advanced-mode" className="text-sm font-medium">
+              Basic Mode
+            </Label>
+            <Switch
+              id="advanced-mode"
+              checked={advancedMode}
+              onCheckedChange={setAdvancedMode}
+              disabled={isProcessing}
+              data-testid="switch-advanced-mode"
+            />
+            <Label htmlFor="advanced-mode" className="text-sm font-medium flex items-center gap-2">
+              <Sparkles className="w-4 h-4" />
+              Advanced AI Mode
+            </Label>
+          </div>
+          
+          {advancedMode && (
+            <div className="mt-4 p-3 bg-pdf-accent/10 border border-pdf-accent/20 rounded-lg max-w-3xl mx-auto">
+              <p className="text-sm text-pdf-accent font-medium">
+                🚀 Advanced Mode Features:
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Text chunk grounding • Semantic analysis • Perfect extraction dashboard • Visual bounding boxes
+              </p>
+            </div>
+          )}
         </div>
 
         {/* File Upload */}
@@ -195,11 +307,22 @@ const PDFViewer = () => {
               <div className="flex items-center gap-3">
                 <CheckCircle className="w-5 h-5 text-pdf-accent" />
                 <div>
-                  <p className="font-semibold text-pdf-accent">Processing Complete!</p>
+                  <p className="font-semibold text-pdf-accent">
+                    {advancedMode ? "Advanced Processing Complete!" : "Processing Complete!"}
+                  </p>
                   <p className="text-sm text-muted-foreground">
                     Successfully processed {pages.length} page{pages.length !== 1 ? 's' : ''} with{' '}
-                    {pages.reduce((sum, page) => sum + page.textChunks.length, 0)} text regions
-                    {pages.some(page => page.textChunks.some(chunk => chunk.id.includes('ocr'))) && (
+                    {advancedMode 
+                      ? `${textChunks.length} AI-extracted elements and ${extractionResult?.intermediate_representation?.pages?.[0]?.blocks?.length || 0} semantic blocks`
+                      : `${pages.reduce((sum, page) => sum + page.textChunks.length, 0)} text regions`
+                    }
+                    {advancedMode && extractionResult?.intermediate_representation && (
+                      <span className="inline-flex items-center gap-1 ml-2 text-pdf-primary">
+                        <span>•</span>
+                        <span className="font-medium">AI Enhanced</span>
+                      </span>
+                    )}
+                    {!advancedMode && pages.some(page => page.textChunks.some(chunk => chunk.id.includes('ocr'))) && (
                       <span className="inline-flex items-center gap-1 ml-2 text-pdf-primary">
                         <span>•</span>
                         <span className="font-medium">OCR Enhanced</span>
@@ -218,39 +341,138 @@ const PDFViewer = () => {
               </div>
             </Card>
 
-            {/* Main Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Document Viewer */}
-              <div className="lg:col-span-2">
-                <DocumentViewer
-                  pages={pages}
-                  highlightedChunk={selectedChunk}
-                  onChunkClick={handleChunkClick}
-                  currentPage={currentPage}
-                  onPageChange={setCurrentPage}
-                />
+            {/* Advanced Mode Controls */}
+            {advancedMode && extractionResult && (
+              <div className="max-w-4xl mx-auto">
+                <Tabs value={activeView} onValueChange={(value) => setActiveView(value as any)} className="w-full">
+                  <TabsList className="grid grid-cols-3 w-full max-w-md mx-auto">
+                    <TabsTrigger value="document" className="text-sm" data-testid="tab-document">
+                      <Eye className="w-4 h-4 mr-2" />
+                      Document
+                    </TabsTrigger>
+                    <TabsTrigger value="chunks" className="text-sm" data-testid="tab-chunks">
+                      <Target className="w-4 h-4 mr-2" />
+                      Text Chunks
+                    </TabsTrigger>
+                    <TabsTrigger value="analytics" className="text-sm" data-testid="tab-analytics">
+                      <Brain className="w-4 h-4 mr-2" />
+                      Analytics
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
               </div>
+            )}
 
-              {/* Text Search Panel */}
-              <div className="lg:col-span-1">
-                <TextSearch
-                  pages={pages}
-                  onChunkSelect={handleChunkSelect}
-                  selectedChunk={selectedChunk}
-                />
+            {/* Main Layout */}
+            {advancedMode && extractionResult ? (
+              <div className="space-y-6">
+                {activeView === 'document' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Document Viewer */}
+                    <div className="lg:col-span-2">
+                      <DocumentViewer
+                        pages={pages}
+                        highlightedChunk={selectedChunk}
+                        onChunkClick={handleChunkClick}
+                        currentPage={currentPage}
+                        onPageChange={setCurrentPage}
+                      />
+                    </div>
+
+                    {/* Text Search Panel */}
+                    <div className="lg:col-span-1">
+                      <TextSearch
+                        pages={pages}
+                        onChunkSelect={handleChunkSelect}
+                        selectedChunk={selectedChunk}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeView === 'chunks' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Document Viewer */}
+                    <div className="lg:col-span-2">
+                      <DocumentViewer
+                        pages={pages}
+                        highlightedChunk={selectedChunk}
+                        onChunkClick={handleChunkClick}
+                        currentPage={currentPage}
+                        onPageChange={setCurrentPage}
+                      />
+                    </div>
+
+                    {/* Text Chunk Highlighter */}
+                    <div className="lg:col-span-1">
+                      <TextChunkHighlighter
+                        textChunks={textChunks}
+                        documentDimensions={documentDimensions}
+                        onChunkHighlight={handleTextChunkHighlight}
+                        onChunkClick={handleTextChunkClick}
+                        highlightedChunk={selectedChunk}
+                        currentPage={currentPage - 1} // Convert to 0-based
+                        showConfidence={true}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeView === 'analytics' && (
+                  <div className="max-w-6xl mx-auto">
+                    <PerfectExtractionDashboard
+                      extractionResult={extractionResult}
+                      processingTime={Date.now()}
+                    />
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Document Viewer */}
+                <div className="lg:col-span-2">
+                  <DocumentViewer
+                    pages={pages}
+                    highlightedChunk={selectedChunk}
+                    onChunkClick={handleChunkClick}
+                    currentPage={currentPage}
+                    onPageChange={setCurrentPage}
+                  />
+                </div>
+
+                {/* Text Search Panel */}
+                <div className="lg:col-span-1">
+                  <TextSearch
+                    pages={pages}
+                    onChunkSelect={handleChunkSelect}
+                    selectedChunk={selectedChunk}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* PDF Processor */}
+        {/* PDF Processors */}
         {file && isProcessing && (
-          <PDFProcessor
-            file={file}
-            onProcessingComplete={handleProcessingComplete}
-            onProgressUpdate={handleProgressUpdate}
-            onError={handleError}
-          />
+          <>
+            {advancedMode ? (
+              <EnhancedPDFProcessor
+                file={file}
+                onProcessingComplete={handleEnhancedProcessingComplete}
+                onProgressUpdate={handleProgressUpdate}
+                onError={handleError}
+                enableAdvancedProcessing={true}
+              />
+            ) : (
+              <PDFProcessor
+                file={file}
+                onProcessingComplete={handleProcessingComplete}
+                onProgressUpdate={handleProgressUpdate}
+                onError={handleError}
+              />
+            )}
+          </>
         )}
       </div>
     </div>
